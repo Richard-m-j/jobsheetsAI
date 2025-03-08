@@ -1,0 +1,6 @@
+azure-functions
+python-dotenv
+oauth2client
+gspread
+langchain_openai
+openai
