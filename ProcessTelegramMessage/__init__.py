@@ -19,11 +19,14 @@ logging.basicConfig(
     handlers=[logging.FileHandler("app.log"), logging.StreamHandler()],
 )
 
+logging.info("Starting the application...")
+
 # Load environment variables
 load_dotenv()
 
-# Validate Environment Variables
+# Validate and log environment variables
 def validate_env_vars():
+    logging.info("Validating environment variables...")
     env_vars = {
         "GOOGLE_SHEET_NAME": os.getenv("GOOGLE_SHEET_NAME"),
         "TELEGRAM_API_ID": os.getenv("TELEGRAM_API_ID"),
@@ -34,15 +37,19 @@ def validate_env_vars():
         "AZURE_OPENAI_ENDPOINT": os.getenv("AZURE_OPENAI_ENDPOINT"),
         "AZURE_OPENAI_DEPLOYMENT_NAME": os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
     }
-    
+
     missing_vars = [key for key, value in env_vars.items() if not value]
     if missing_vars:
         logging.error(f"Missing required environment variables: {', '.join(missing_vars)}")
         return False
-    logging.info("All environment variables are validated and present.")
+
+    for key, value in env_vars.items():
+        logging.info(f"Environment variable '{key}' is correctly set.")
+    
     return True
 
 if not validate_env_vars():
+    logging.error("Exiting due to missing environment variables.")
     exit(1)
 
 GOOGLE_SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
@@ -57,23 +64,31 @@ AZURE_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION")
 AZURE_API_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
 
-# Initialize the Azure OpenAI Client
-client = AzureChatOpenAI(
-    azure_deployment=AZURE_DEPLOYMENT_NAME,
-    api_version=AZURE_API_VERSION,
-    temperature=0,
-    max_tokens=None,
-    timeout=None,
-    max_retries=2,
-)
+# Initialize the Azure OpenAI client
+try:
+    logging.info("Initializing Azure OpenAI client...")
+    client = AzureChatOpenAI(
+        azure_deployment=AZURE_DEPLOYMENT_NAME,
+        api_version=AZURE_API_VERSION,
+        temperature=0,
+        max_tokens=None,
+        timeout=None,
+        max_retries=2,
+    )
+    logging.info("Azure OpenAI client initialized successfully.")
+except Exception as e:
+    logging.error(f"Failed to initialize Azure OpenAI client: {e}")
+    logging.error(traceback.format_exc())
+    exit(1)
 
 CREDENTIALS_FILES = glob.glob("*.json")
+logging.info(f"Found {len(CREDENTIALS_FILES)} Google Sheets credentials files: {CREDENTIALS_FILES}")
 
 # Structured Output Schema with Pydantic
 class JobDetails(BaseModel):
     company_name: str = Field(description="The name of the company.")
     job_role: str = Field(description="The specific job role or position.")
-    ctc: Optional[str] = Field(description="The Cost to Company or salary information (e.g., 10-15 LPA).")
+    ctc: Optional[str] = Field(description="Cost to Company or salary information.")
     application_link: Optional[str] = Field(description="The URL or link to apply for the job.")
 
 structured_client = client.with_structured_output(JobDetails)
@@ -107,6 +122,7 @@ def extract_job_details(message: str) -> JobDetails:
 
 # Google Sheets Helper Functions
 def connect_to_google_sheet(credentials_file: str):
+    logging.info(f"Connecting to Google Sheet with credentials: {credentials_file}")
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive",
@@ -115,14 +131,15 @@ def connect_to_google_sheet(credentials_file: str):
         creds = ServiceAccountCredentials.from_json_keyfile_name(credentials_file, scope)
         client = gspread.authorize(creds)
         sheet = client.open(GOOGLE_SHEET_NAME).sheet1
-        logging.info(f"Connected to Google Sheet using credentials: {credentials_file}")
+        logging.info(f"Connected to Google Sheet: {sheet.title}")
         return sheet
     except Exception as e:
-        logging.error(f"Could not connect to Google Sheet ({credentials_file}): {e}")
+        logging.error(f"Failed to connect to Google Sheet ({credentials_file}): {e}")
         logging.error(traceback.format_exc())
         raise e
 
 def append_to_google_sheets(sheets, data: JobDetails):
+    logging.info(f"Appending data to sheets: {data}")
     for sheet in sheets:
         try:
             sheet.append_row(
@@ -154,19 +171,20 @@ def process_message(message_text: str, sheets):
 
 # Telegram Event Handlers
 async def handle_new_message(event, sheets):
-    message_text = event.raw_text
-    logging.info(f"New message received: {message_text[:100]}")
-    process_message(message_text, sheets)
+    logging.info(f"New message received: {event.raw_text[:100]}")
+    process_message(event.raw_text, sheets)
 
 # Main Workflow
 async def main():
     try:
+        logging.info("Initializing Telegram client...")
         client_telegram = TelegramClient("Session", API_ID, API_HASH)
         await client_telegram.start()
-        logging.info("Connected to Telegram!")
+        logging.info("Successfully connected to Telegram!")
 
         # Connect to Google Sheets
         sheets = []
+        logging.info("Connecting to Google Sheets...")
         for credentials_file in CREDENTIALS_FILES:
             try:
                 sheet = connect_to_google_sheet(credentials_file)
@@ -187,7 +205,6 @@ async def main():
                 logging.info(f"Listening to messages from channel: {entity.title}")
             except Exception as e:
                 logging.error(f"Failed to get entity for channel {channel}: {e}")
-                logging.error(traceback.format_exc())
 
         # Fetch and process messages
         now = datetime.utcnow()
@@ -201,7 +218,6 @@ async def main():
                         process_message(msg.message, sheets)
             except Exception as e:
                 logging.error(f"Error processing messages from channel {entity.title}: {e}")
-                logging.error(traceback.format_exc())
 
         # Event listener for new messages
         @client_telegram.on(events.NewMessage(chats=channel_entities))
@@ -217,6 +233,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
+        logging.info("Starting main function...")
         asyncio.run(main())
     except KeyboardInterrupt:
         logging.info("Program terminated by user.")
