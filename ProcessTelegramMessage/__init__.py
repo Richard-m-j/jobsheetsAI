@@ -234,9 +234,9 @@ async def main():
 if __name__ == "__main__":
     try:
         logging.info("Starting main function...")
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logging.info("Program terminated by user.")
+        # asyncio.run(main())
+    # except KeyboardInterrupt:
+    #     logging.info("Program terminated by user.")
     except Exception as e:
         logging.error(f"Unexpected error: {e}")
         logging.error(traceback.format_exc())
